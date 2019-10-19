@@ -54,11 +54,13 @@ public interface MudrodConstants {
 
   public static final String FTP_LOG = "ftp";
 
-//  public static final String HTTP_PREFIX = "mudrod.http.prefix";
+  public static final String HTTP_PREFIX = "mudrod.http.prefix";
 
-//  public static final String HTTP_TYPE = "raw.http";
+  public static final String HTTP_TYPE = "raw.http";
 
-//  public static final String HTTP_LOG = "http";
+  public static final String HTTP_LOG = "http";
+  
+  public static final String BASE_URL = "mudrod.base.url";
   
   public static final String ACCESS_PREFIX = "mudrod.access.prefix";
 

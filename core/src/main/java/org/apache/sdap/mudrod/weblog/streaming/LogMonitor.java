@@ -167,14 +167,14 @@ public class LogMonitor {
   }
   
   public static void main(String[] args) throws Exception {
-   /* if (args.length == 0) {
+    /* if (args.length == 0) {
       System.out.println("Must specify an access logs directory.");
       System.exit(-1);
     }
-
     String directory = args[0];*/
     
-    String directory = "/Users/caohengning/Desktop/1/mudrod/file/dynamic/stream_source";
+    //When testing, please replace the directory to the streaming log  output directory
+    String directory = "D:\\python_workspace\\MUDRODRanking\\Real-time-session\\stream_output\\";
 
     MudrodEngine mudrod = new MudrodEngine();
     Properties props = mudrod.loadConfig();
