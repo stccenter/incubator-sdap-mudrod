@@ -43,7 +43,7 @@ public class SessionNode {
   // seq: sequence of this node
   protected int seq;
   // key: type of this node extracted from url, including three types -
-  // dataset,datasetlist,ftp
+  // dataset,datasetlist,download(ftp, threadds, opendap)
   protected String key;
   // logType: log types of this node, including two types - po.dacc, ftp
   protected String logType;
@@ -72,7 +72,7 @@ public class SessionNode {
     this.time = time;
     this.seq = seq;
     this.setRequest(request);
-    this.setReferer(referer, props.getProperty(MudrodConstants.BASE_URL));
+    this.setReferer(referer);
     this.setKey(props, request, logType);
   }
 
@@ -81,12 +81,26 @@ public class SessionNode {
    *
    * @param referer previous request url
    */
-  public void setReferer(String referer, String basicUrl) {
+  public void setReferer(String referer) {
+    
     if (referer == null) {
       this.referer = "";
       return;
     }
-	this.referer= referer.toLowerCase().replace(basicUrl, "");
+    
+    // cut basic url by splitting request
+    String[] tmp = referer.split("jpl.nasa.gov");
+    if (tmp.length == 2) {
+      this.referer = tmp[1];
+    } else if (tmp.length > 2) {
+      for (int i = 1; i < tmp.length; i++) {
+        this.referer += tmp[i];
+      }
+    } else {
+      this.referer = "";
+    }
+    
+    this.referer = this.referer.toLowerCase();
   }
 
   /**
@@ -96,7 +110,9 @@ public class SessionNode {
    */
   public void setRequest(String req) {
     this.request = req;
-    if (this.logType.equals(MudrodConstants.HTTP_LOG)) {
+    if (this.logType.equals(MudrodConstants.ACCESS_LOG) || 
+        this.logType.equals(MudrodConstants.OPENDAP_LOG) ||
+        this.logType.equals(MudrodConstants.THREDDS_LOG)) {
       this.parseRequest(req);
     }
   }
@@ -153,7 +169,7 @@ public class SessionNode {
 
   /**
    * setKey:Set request type which contains three categories -
-   * dataset,datasetlist,ftp
+   * dataset,datasetlist,download
    *
    * @param request request url
    * @param logType url type
@@ -162,8 +178,9 @@ public class SessionNode {
     this.key = "";
     String datasetlist = props.getProperty(MudrodConstants.SEARCH_MARKER);
     String dataset = props.getProperty(MudrodConstants.VIEW_MARKER);
-    if (logType.equals("ftp")) {
-      this.key = "ftp";
+    if (logType.equals(MudrodConstants.FTP_LOG) || logType.equals(MudrodConstants.THREDDS_LOG)
+        || logType.equals(MudrodConstants.OPENDAP_LOG)) {
+      this.key = logType;
     } else if (logType.equals("root")) {
       this.key = "root";
     } else {
@@ -265,7 +282,7 @@ public class SessionNode {
   public String getFilterStr() {
     String filter = "";
     if (this.filter.size() > 0) {
-      Iterator iter = this.filter.keySet().iterator();
+      Iterator<String> iter = this.filter.keySet().iterator();
       while (iter.hasNext()) {
         String key = (String) iter.next();
         String val = this.filter.get(key);

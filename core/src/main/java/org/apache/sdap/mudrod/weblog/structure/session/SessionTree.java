@@ -116,7 +116,9 @@ public class SessionTree extends MudrodAbstract {
     // remove unrelated node
     if (!MudrodConstants.SEARCH_MARKER.equals(node.getKey()) &&
             !MudrodConstants.VIEW_MARKER.equals(node.getKey()) &&
-            !MudrodConstants.FTP_LOG.equals(node.getKey())) {
+            !MudrodConstants.FTP_LOG.equals(node.getKey()) &&
+            !MudrodConstants.THREDDS_LOG.equals(node.getKey()) &&
+            !MudrodConstants.OPENDAP_LOG.equals(node.getKey())) {
       return null;
     }
     // remove dumplicated click
@@ -132,7 +134,8 @@ public class SessionTree extends MudrodAbstract {
     parentnode.addChildren(node);
 
     // record insert node
-    tmpnode = node;
+    if (node.logType.equals(MudrodConstants.ACCESS_LOG))
+      tmpnode = node;
     if (MudrodConstants.VIEW_MARKER.equals(node.getKey())) {
       latestDatasetnode = node;
     }
@@ -148,12 +151,14 @@ public class SessionTree extends MudrodAbstract {
    */
   public void printTree(SessionNode node) {
     LOG.info("node: {} \n", node.getRequest());
+    
     if (!node.children.isEmpty()) {
       for (int i = 0; i < node.children.size(); i++) {
         printTree(node.children.get(i));
       }
     }
   }
+
 
   /**
    * TreeToJson: Convert the session tree to Json object
@@ -166,13 +171,15 @@ public class SessionTree extends MudrodAbstract {
     JsonObject json = new JsonObject();
 
     json.addProperty("seq", node.getSeq());
-    if ("datasetlist".equals(node.getKey())) {
+    if (MudrodConstants.SEARCH_MARKER.equals(node.getKey())) {
       json.addProperty("icon", "./resources/images/searching.png");
       json.addProperty("name", node.getRequest());
-    } else if ("dataset".equals(node.getKey())) {
+    } else if (MudrodConstants.VIEW_MARKER.equals(node.getKey())) {
       json.addProperty("icon", "./resources/images/viewing.png");
       json.addProperty("name", node.getDatasetId());
-    } else if ("ftp".equals(node.getKey())) {
+    } else if (MudrodConstants.FTP_LOG.equals(node.getKey()) || 
+        MudrodConstants.OPENDAP_LOG.equals(node.getKey()) || 
+        MudrodConstants.THREDDS_LOG.equals(node.getKey())) {
       json.addProperty("icon", "./resources/images/downloading.png");
       json.addProperty("name", node.getRequest());
     } else if ("root".equals(node.getKey())) {
@@ -197,32 +204,42 @@ public class SessionTree extends MudrodAbstract {
    * getClickStreamList: Get click stream list in the session
    *
    * @return {@link ClickStream}
+   * @throws UnsupportedEncodingException 
    */
-  public List<ClickStream> getClickStreamList(Properties props) {
+  public List<ClickStream> getClickStreamList(Properties props) throws UnsupportedEncodingException {
 
     List<ClickStream> clickthroughs = new ArrayList<>();
     List<SessionNode> viewnodes = this.getViewNodes(this.root);
     for (SessionNode viewnode : viewnodes) {
       SessionNode parent = viewnode.getParent();
       List<SessionNode> children = viewnode.getChildren();
-
+      
+      // if parent node is not a search node
       if (!MudrodConstants.SEARCH_MARKER.equals(parent.getKey())) {
         continue;
       }
 
       RequestUrl requestURL = new RequestUrl();
       String viewquery = "";
+      
+      /*
       try {
         String infoStr = requestURL.getSearchInfo(viewnode.getRequest());
         viewquery = es.customAnalyzing(props.getProperty(MudrodConstants.ES_INDEX_NAME), infoStr);
       } catch (UnsupportedEncodingException | InterruptedException | ExecutionException e) {
         LOG.warn("Exception getting search info. Ignoring...", e);
       }
+      */
+      
+      // get search info from search log instead of view log
+      viewquery = requestURL.getSearchInfo(parent.getRequest());
 
       String dataset = viewnode.getDatasetId();
       boolean download = false;
       for (SessionNode child : children) {
-        if ("ftp".equals(child.getKey())) {
+        if (MudrodConstants.FTP_LOG.equals(child.getKey()) ||
+            MudrodConstants.OPENDAP_LOG.equals(child.getKey()) ||
+            MudrodConstants.THREDDS_LOG.equals(child.getKey())) {
           download = true;
           break;
         }
@@ -254,7 +271,7 @@ public class SessionTree extends MudrodAbstract {
 
     String nodeKey = node.getKey();
 
-    if ("datasetlist".equals(nodeKey)) {
+    if (MudrodConstants.SEARCH_MARKER.equals(nodeKey)) {
       if ("-".equals(node.getReferer())) {
         return root;
       } else {
@@ -265,13 +282,15 @@ public class SessionTree extends MudrodAbstract {
           return tmp;
         }
       }
-    } else if ("dataset".equals(nodeKey)) {
+    } else if (MudrodConstants.VIEW_MARKER.equals(nodeKey)) {
       if ("-".equals(node.getReferer())) {
         return null;
       } else {
         return this.findLatestRefer(tmpnode, node.getReferer());
       }
-    } else if ("ftp".equals(nodeKey)) {
+    } else if (MudrodConstants.FTP_LOG.equals(nodeKey) || 
+        MudrodConstants.OPENDAP_LOG.equals(nodeKey) ||
+        MudrodConstants.THREDDS_LOG.equals(nodeKey)) {
       return latestDatasetnode;
     }
 
@@ -294,6 +313,8 @@ public class SessionTree extends MudrodAbstract {
       SessionNode parentNode = node.getParent();
       if (refer.equals(parentNode.getRequest())) {
         return parentNode;
+      } else if (refer.equals(node.getRequest())) {
+        return node;
       }
 
       SessionNode tmp = this.iterChild(parentNode, refer);
@@ -324,7 +345,7 @@ public class SessionTree extends MudrodAbstract {
           continue;
         }
       } else {
-        iterChild(tmp, refer);
+        return iterChild(tmp, refer);
       }
     }
 
@@ -455,4 +476,83 @@ public class SessionTree extends MudrodAbstract {
 
     return nodes;
   }
+  
+  /**
+   * Obtain the ranking training data.
+   *
+   * @param indexName   the index from whcih to obtain the data
+   * @return {@link ClickStream}
+   * @throws UnsupportedEncodingException if there is an error whilst
+   *                                      processing the ranking training data.
+   */
+  public List<RankingTrainData> getRankingTrainData(String indexName) throws UnsupportedEncodingException {
+
+    List<RankingTrainData> trainDatas = new ArrayList<>();
+    
+    List<SessionNode> queryNodes = this.getQueryNodes(this.root);
+    for (SessionNode querynode : queryNodes) {
+      List<SessionNode> children = querynode.getChildren();
+
+      LinkedHashMap<String, Boolean> datasetOpt = new LinkedHashMap<>();
+      int ndownload = 0;
+      for (SessionNode node : children) {
+        if (MudrodConstants.VIEW_MARKER.equals(node.getKey())) {
+          Boolean bDownload = false;
+          List<SessionNode> nodeChildren = node.getChildren();
+          for (SessionNode aNodeChildren : nodeChildren) {
+            if (MudrodConstants.FTP_LOG.equals(aNodeChildren.getKey()) ||
+                MudrodConstants.OPENDAP_LOG.equals(aNodeChildren.getKey()) ||
+                MudrodConstants.THREDDS_LOG.equals(aNodeChildren.getKey())) {
+              bDownload = true;
+              ndownload += 1;
+              break;
+            }
+          }
+          datasetOpt.put(node.datasetId, bDownload);
+        }
+      }
+      
+      // method 1: The priority of download data are higher
+      if (datasetOpt.size() > 1 && ndownload > 0) {
+        // query
+        RequestUrl requestURL = new RequestUrl();
+        String queryUrl = querynode.getRequest();
+        String infoStr = requestURL.getSearchInfo(queryUrl);
+        String query = null;
+        /*
+        try {
+          query = es.customAnalyzing(props.getProperty(MudrodConstants.ES_INDEX_NAME), infoStr);
+        } catch (InterruptedException | ExecutionException e) {
+          throw new RuntimeException("Error performing custom analyzing", e);
+        }
+        */
+        query = infoStr;
+        Map<String, String> filter = RequestUrl.getFilterInfo(queryUrl);
+
+        for (String datasetA : datasetOpt.keySet()) {
+          Boolean bDownloadA = datasetOpt.get(datasetA);
+          if (bDownloadA) {
+            for (String datasetB : datasetOpt.keySet()) {
+              Boolean bDownloadB = datasetOpt.get(datasetB);
+              if (!bDownloadB) {
+
+                String[] queries = query.split(",");
+                for (String query1 : queries) {
+                  RankingTrainData trainData = new RankingTrainData(query1, datasetA, datasetB);
+                  trainData.setSessionId(this.sessionID);
+                  trainData.setIndex(indexName);
+                  trainData.setFilter(filter);
+                  trainDatas.add(trainData);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return trainDatas;
+  }
+  
+  
 }

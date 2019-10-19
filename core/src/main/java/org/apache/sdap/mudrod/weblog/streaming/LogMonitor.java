@@ -23,6 +23,7 @@ import org.joda.time.DateTimeZone;
 import scala.Tuple2;
 import org.joda.time.Seconds;
 
+
 /**
  * The LogAnalyzerImportStreamingFile illustrates how to run Spark Streaming,
  * but instead of monitoring a socket, it monitors a directory and feeds in any
@@ -38,10 +39,10 @@ import org.joda.time.Seconds;
  */
 public class LogMonitor {
   private static Properties props;
-  private static final Duration SLIDE_INTERVAL = new Duration(3 * 1000);
+  private static final Duration SLIDE_INTERVAL = new Duration(4 * 1000);
   private static final int interval_timeout = 300;
   private static final int session_maxinum_timeout = 600;
-
+  
   private static final Function2<Long, Long, Long> SUM_REDUCER = (a, b) -> a + b;
   private static final Function2<DynamicSession, DynamicSession, DynamicSession> Session_Merger = (s1, s2) -> DynamicSession.add(s1, s2);
   private static final Function2<List<DynamicSession>, Optional<DynamicSession>, Optional<DynamicSession>> COMPUTE_RUNNING_SESSION = (news, current) -> {
@@ -52,14 +53,35 @@ public class LogMonitor {
       int session_length = Seconds.secondsBetween(now, s.getStartTimeObj()).getSeconds();
       if (interval > interval_timeout || session_length > session_maxinum_timeout) {
           s = null;
+
           //System.out.println("h1");
       }
     } 
     
     for (DynamicSession i : news) {
-      s = DynamicSession.add(s, i);
-      //System.out.println("h2");
+      // s = DynamicSession.add(s, i);
+      // System.out.println("h2");
+      
+      if (s == null) {
+        s = i;
+      } else {
+        s.incorporate(i);
+      }
+      
+      // test
+      /*
+      System.out.print("*Update state ");
+      if (s != null) {
+        System.out.print(s.getIpAddress() + " ");
+      }
+      if (i != null) {
+        System.out.println(i.getIpAddress());
+      }
+      */
     }
+    
+    s.generateClickStream();
+    s.generateRankingTrainData();
 
     if (s == null || !s.hasHttpLog()) {
       //System.out.println("h3");
@@ -80,24 +102,26 @@ public class LogMonitor {
     JavaDStream<WebLog> usefulLogDStream = logDataDStream.map(log -> WebLogFactory.parseFromLogLine(log, props)).filter(log -> log != null);
 
     // A DStream of sessions with ip being the key
-    JavaPairDStream<String, DynamicSession> ipDStream = usefulLogDStream.mapToPair(s -> new Tuple2<>(s.getIP(), new DynamicSession(s))).reduceByKey(Session_Merger)
-        .updateStateByKey(COMPUTE_RUNNING_SESSION);
+    JavaPairDStream<String, DynamicSession> ipDStream = usefulLogDStream.mapToPair(s -> new Tuple2<>(s.getIP(), new DynamicSession(s, props)))
+        .reduceByKey(Session_Merger).updateStateByKey(COMPUTE_RUNNING_SESSION);
 
     ipDStream.foreachRDD(rdd -> {
       //System.out.println("h5");
       List<Tuple2<String, DynamicSession>> sessions = rdd.take(100);
       for (Tuple2<String, DynamicSession> t : sessions) {
+        
         List<WebLog> logs = t._2.getLogList();
-        int httpCount = 0;
-        int ftpCount = 0;
+        int accessCount = 0;
+        int downloadCount = 0;
         for (WebLog log : logs) {
-          if (log.getLogType().equals(MudrodConstants.HTTP_LOG)) {
-            httpCount += 1;
+          if (log.getLogType().equals(MudrodConstants.ACCESS_LOG)) {
+            accessCount += 1;
           } else {
-            ftpCount += 1;
+            downloadCount += 1;
           }
         }
-        System.out.println(t._1 + " " + httpCount + " http, " + ftpCount + " ftp");
+        
+        System.out.println(t._1 + " " + accessCount + " access, " + downloadCount + " download");
         
         //for test
         System.out.println("original logs:");
@@ -106,10 +130,19 @@ public class LogMonitor {
         }
         
         t._2.parseLogs();
-        /* System.out.println("SessionTree:");
+        
+        System.out.println("SessionTree:");
+        t._2.printSessionTree();
+        
+        System.out.println("ClickStreams:");
+        t._2.printClickStream();
+        
+        System.out.println("RankingTrainData:");
+        t._2.printRankingTrainData();
+        
+        /*
         SessionTree tree = t._2.buildTree(props);
         //for test
-        
         System.out.println("SessionTree:");
         SessionTree tree = t._2.buildTree(props);
         List<RecomTrainData> clicks = t._2.getRecomTrainData(tree);
@@ -132,16 +165,16 @@ public class LogMonitor {
       e.printStackTrace();
     }
   }
-
+  
   public static void main(String[] args) throws Exception {
-   /* if (args.length == 0) {
+    /* if (args.length == 0) {
       System.out.println("Must specify an access logs directory.");
       System.exit(-1);
     }
-
     String directory = args[0];*/
     
-    String directory = "E://data//mudrod//streamtest";
+    //When testing, please replace the directory to the streaming log  output directory
+    String directory = "D:\\python_workspace\\MUDRODRanking\\Real-time-session\\stream_output\\";
 
     MudrodEngine mudrod = new MudrodEngine();
     Properties props = mudrod.loadConfig();
